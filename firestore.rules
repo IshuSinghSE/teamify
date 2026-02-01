@@ -25,8 +25,31 @@ service cloud.firestore {
 
     // Tasks: all members can read/create/update; only admins can delete
     match /teams/{teamId}/tasks/{taskId} {
-      allow read, create, update: if request.auth != null
+      allow read: if request.auth != null
         && exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid));
+
+      // Create: must be a team member and `createdBy` must match the caller
+      allow create: if request.auth != null
+        && exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid))
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status in ["pending", "in_progress", "done"]
+        && request.resource.data.title is string;
+
+      // Update: admins can update any fields; members can only change `status` and `description` (not `title`)
+      allow update: if request.auth != null
+        && exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid))
+        && (
+          // Admins may update anything
+          get(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)).data.role == 'admin'
+          || (
+            // Non-admins may only modify status and description and must not change title
+            request.resource.data.title == resource.data.title
+            && (request.resource.data.keys().hasOnly(['title','description','status','createdBy','createdAt','updatedAt']) || request.resource.data.keys().hasOnly(['description','status','updatedAt','title','createdBy','createdAt']))
+            && request.resource.data.status in ["pending", "in_progress", "done"]
+          )
+        );
+
+      // Delete: only admins
       allow delete: if request.auth != null
         && get(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)).data.role == 'admin';
     }

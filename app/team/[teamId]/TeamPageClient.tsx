@@ -12,6 +12,7 @@ import {
   getTeam,
   getTeamMembersWithUsers,
   TeamWithId,
+  deleteTeam,
 } from "@/lib/teams";
 import {
   createTask,
@@ -52,6 +53,9 @@ export default function TeamPageClient() {
 
   const [tasks, setTasks] = useState<TaskWithId[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [editingDesc, setEditingDesc] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDesc, setTaskDesc] = useState("");
   const [taskError, setTaskError] = useState("");
@@ -61,6 +65,7 @@ export default function TeamPageClient() {
   const [inviteError, setInviteError] = useState("");
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [deletingTeam, setDeletingTeam] = useState(false);
 
   const loadTeamData = useCallback(async (id: string) => {
     setTeamLoading(true);
@@ -101,11 +106,18 @@ export default function TeamPageClient() {
 
   useEffect(() => {
     if (teamId) {
-      void loadTeamData(teamId);
+      const id = teamId;
+      const handle = setTimeout(() => {
+        void loadTeamData(id);
+      }, 0);
+      return () => clearTimeout(handle);
     } else {
-      setTeam(null);
-      setMembers([]);
-      setTasks([]);
+      const handle = setTimeout(() => {
+        setTeam(null);
+        setMembers([]);
+        setTasks([]);
+      }, 0);
+      return () => clearTimeout(handle);
     }
   }, [teamId, loadTeamData]);
 
@@ -131,6 +143,23 @@ export default function TeamPageClient() {
       setInviteEmail("");
     } else {
       setInviteError(result.error ?? "Failed to send invite");
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    if (!teamId || !team) return;
+    const ok = window.confirm(
+      `Delete team "${team.name}"? This will remove the team and all its data. This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingTeam(true);
+    const res = await deleteTeam(teamId);
+    setDeletingTeam(false);
+    if (res.success) {
+      // navigate back to dashboard
+      router.push("/dashboard");
+    } else {
+      setInviteError(res.error ?? "Failed to delete team");
     }
   };
 
@@ -160,6 +189,32 @@ export default function TeamPageClient() {
     if (!teamId) return;
     await updateTask(teamId, taskId, { status });
     loadTasks(teamId);
+  };
+
+  const startEditTask = (task: TaskWithId) => {
+    setEditingTaskId(task.id);
+    setEditingTitle(task.title);
+    setEditingDesc(task.description || "");
+  };
+
+  const cancelEditTask = () => {
+    setEditingTaskId(null);
+    setEditingTitle("");
+    setEditingDesc("");
+  };
+
+  const saveEditTask = async (taskId: string) => {
+    if (!teamId) return;
+    const updates: Partial<Pick<Task, "title" | "description">> = {};
+    updates.title = editingTitle;
+    updates.description = editingDesc;
+    const { error } = await updateTask(teamId, taskId, updates);
+    if (error) {
+      setTaskError(error);
+    } else {
+      cancelEditTask();
+      loadTasks(teamId);
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -309,6 +364,16 @@ export default function TeamPageClient() {
                   {inviteSuccess && (
                     <p className="mt-2 text-sm text-emerald-400">{inviteSuccess}</p>
                   )}
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={handleDeleteTeam}
+                      disabled={deletingTeam}
+                      className="rounded-xl bg-red-700 px-4 py-2 font-medium text-white transition hover:bg-red-600 disabled:opacity-50"
+                    >
+                      {deletingTeam ? "Deleting…" : "Delete team"}
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -354,11 +419,29 @@ export default function TeamPageClient() {
                       className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium text-white">{task.title}</p>
-                        {task.description && (
-                          <p className="mt-0.5 text-sm text-zinc-500">
-                            {task.description}
-                          </p>
+                        {editingTaskId === task.id ? (
+                          <div>
+                            <input
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              disabled={!isAdmin}
+                              className={`w-full rounded-md border px-2 py-1 text-white bg-zinc-900/80 placeholder-zinc-500 ${!isAdmin ? 'opacity-60' : ''}`}
+                            />
+                            <textarea
+                              value={editingDesc}
+                              onChange={(e) => setEditingDesc(e.target.value)}
+                              className="mt-2 w-full rounded-md border px-2 py-1 text-sm text-zinc-200 bg-zinc-900/80 placeholder-zinc-500"
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <p className="font-medium text-white">{task.title}</p>
+                            {task.description && (
+                              <p className="mt-0.5 text-sm text-zinc-500">
+                                {task.description}
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
@@ -378,14 +461,43 @@ export default function TeamPageClient() {
                             </option>
                           ))}
                         </select>
-                        {isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTask(task.id)}
-                            className="rounded-lg bg-red-600/20 px-2.5 py-1.5 text-sm text-red-400 transition hover:bg-red-600/30"
-                          >
-                            Delete
-                          </button>
+
+                        {editingTaskId === task.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => saveEditTask(task.id)}
+                              className="rounded-md bg-emerald-600 px-3 py-1 text-sm text-white"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditTask}
+                              className="rounded-md bg-zinc-700 px-3 py-1 text-sm text-zinc-200"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => startEditTask(task)}
+                              className="rounded-md bg-blue-600 px-3 py-1 text-sm text-white"
+                            >
+                              Edit
+                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTask(task.id)}
+                                className="rounded-lg bg-red-600/20 px-2.5 py-1.5 text-sm text-red-400 transition hover:bg-red-600/30"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </li>

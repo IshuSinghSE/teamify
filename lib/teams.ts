@@ -2,6 +2,7 @@ import { db } from "./firebase";
 import {
   collection,
   doc,
+  deleteDoc,
   getDoc,
   getDocs,
   writeBatch,
@@ -169,6 +170,7 @@ export const getTeamsForUser = async (
     }
 
     // Teams where user is in members (e.g. invited); may need collection group index
+    let memberQueryFailed = false;
     try {
         const membersGroup = collectionGroup(db, "members");
         const memberQuery = query(
@@ -180,8 +182,32 @@ export const getTeamsForUser = async (
             const teamId = d.ref.parent.parent?.id;
             if (teamId) teamIds.add(teamId);
         });
-    } catch {
+    } catch (err: unknown) {
         // Collection group often needs an index; don't fail the whole load
+        memberQueryFailed = true;
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("[getTeamsForUser] collectionGroup members query failed, will fallback to per-team check:", message);
+    }
+
+    // Fallback: if collectionGroup failed, iterate all teams and check member doc existence.
+    if (memberQueryFailed) {
+        try {
+            const teamsCol = collection(db, "teams");
+            const allTeamsSnap = await getDocs(teamsCol);
+            for (const tdoc of allTeamsSnap.docs) {
+                try {
+                    const memberRef = doc(db, "teams", tdoc.id, "members", uid);
+                    const memberSnap = await getDoc(memberRef);
+                    if (memberSnap.exists()) teamIds.add(tdoc.id);
+                } catch(err) {
+                    // ignore per-team errors
+                    console.error("[getTeamsForUser] per-team member check failed for team", tdoc.id, ":", err);
+                }
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error("[getTeamsForUser] fallback per-team member check failed:", message);
+        }
     }
 
     const ids = Array.from(teamIds);
@@ -198,4 +224,80 @@ export const getTeamsForUser = async (
     const teams = results.filter((t): t is TeamWithMeta => t !== null);
 
     return { teams, error: null };
+};
+
+/**
+ * Delete a team and its related documents (members, tasks, invites).
+ * Performs batched deletes; safe for small-to-medium teams.
+ */
+export const deleteTeam = async (
+    teamId: string
+): Promise<{ success: boolean; error?: string }> => {
+    try {
+        // Delete members
+        const membersCol = collection(db, "teams", teamId, "members");
+        const membersSnap = await getDocs(membersCol);
+        let batch = writeBatch(db);
+        let ops = 0;
+        for (const docSnap of membersSnap.docs) {
+            batch.delete(doc(db, `teams/${teamId}/members/${docSnap.id}`));
+            ops++;
+            if (ops >= 450) {
+                await batch.commit();
+                batch = writeBatch(db);
+                ops = 0;
+            }
+        }
+        if (ops > 0) await batch.commit();
+
+        // Delete tasks subcollection (if present)
+        try {
+            const tasksCol = collection(db, "teams", teamId, "tasks");
+            const tasksSnap = await getDocs(tasksCol);
+            batch = writeBatch(db);
+            ops = 0;
+            for (const tdoc of tasksSnap.docs) {
+                batch.delete(doc(db, `teams/${teamId}/tasks/${tdoc.id}`));
+                ops++;
+                if (ops >= 450) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    ops = 0;
+                }
+            }
+            if (ops > 0) await batch.commit();
+        } catch {
+            // ignore if tasks not present
+        }
+
+        // Delete invites where teamId == teamId (top-level collection)
+        try {
+            const invitesCol = collection(db, "invites");
+            const q = query(invitesCol, where("teamId", "==", teamId));
+            const invitesSnap = await getDocs(q);
+            batch = writeBatch(db);
+            ops = 0;
+            for (const idoc of invitesSnap.docs) {
+                batch.delete(doc(db, `invites/${idoc.id}`));
+                ops++;
+                if (ops >= 450) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    ops = 0;
+                }
+            }
+            if (ops > 0) await batch.commit();
+        } catch {
+            // ignore
+        }
+
+        // Finally delete the team document
+        const teamRef = doc(db, "teams", teamId);
+        await deleteDoc(teamRef);
+
+        return { success: true };
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+    }
 };
