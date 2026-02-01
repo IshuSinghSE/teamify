@@ -49,6 +49,7 @@ export default function TeamPageClient() {
 
   const [team, setTeam] = useState<TeamWithId | null>(null);
   const [members, setMembers] = useState<TeamMemberWithUser[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [teamLoading, setTeamLoading] = useState(true);
 
   const [tasks, setTasks] = useState<TaskWithId[]>([]);
@@ -69,13 +70,19 @@ export default function TeamPageClient() {
 
   const loadTeamData = useCallback(async (id: string) => {
     setTeamLoading(true);
+    setMembersError(null);
+    console.log('[TeamPageClient] Loading team data for:', id);
     const [teamRes, membersRes, tasksRes] = await Promise.all([
       getTeam(id),
       getTeamMembersWithUsers(id),
       getTasks(id),
     ]);
     setTeamLoading(false);
+    console.log('[TeamPageClient] Team:', teamRes.team);
+    console.log('[TeamPageClient] Members:', membersRes.members, 'Error:', membersRes.error);
+    console.log('[TeamPageClient] Tasks:', tasksRes.tasks);
     if (teamRes.team) setTeam(teamRes.team);
+    if (membersRes.error) setMembersError(membersRes.error);
     if (membersRes.members.length >= 0) setMembers(membersRes.members);
     if (!tasksRes.error) setTasks(tasksRes.tasks);
   }, []);
@@ -312,28 +319,39 @@ export default function TeamPageClient() {
                 <h4 className="mb-2 text-sm font-medium text-zinc-400">
                   Members ({members.length})
                 </h4>
-                <ul className="divide-y divide-zinc-800 rounded-xl border border-zinc-800">
-                  {members.map((m) => (
-                    <li
-                      key={m.userId}
-                      className="flex items-center justify-between px-4 py-3"
-                    >
-                      <div>
-                        <span className="text-white">{m.name}</span>
-                        <span className="ml-2 text-sm text-zinc-500">{m.email}</span>
-                      </div>
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          m.role === "admin"
-                            ? "bg-blue-500/20 text-blue-300"
-                            : "bg-zinc-700 text-zinc-400"
-                        }`}
+                {membersError && (
+                  <p className="mb-2 text-sm text-red-400">
+                    Error loading members: {membersError}
+                  </p>
+                )}
+                {members.length === 0 && !membersError ? (
+                  <p className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-zinc-500">
+                    No members found
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-zinc-800 rounded-xl border border-zinc-800">
+                    {members.map((m) => (
+                      <li
+                        key={m.userId}
+                        className="flex items-center justify-between px-4 py-3"
                       >
-                        {m.role}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                        <div>
+                          <span className="text-white">{m.name}</span>
+                          <span className="ml-2 text-sm text-zinc-500">{m.email}</span>
+                        </div>
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            m.role === "admin"
+                              ? "bg-blue-500/20 text-blue-300"
+                              : "bg-zinc-700 text-zinc-400"
+                          }`}
+                        >
+                          {m.role}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               {isAdmin && (

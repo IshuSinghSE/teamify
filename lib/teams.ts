@@ -113,7 +113,9 @@ export const getTeamMembersWithUsers = async (
 ): Promise<{ members: TeamMemberWithUser[]; error: string | null }> => {
     try {
         const membersCol = collection(db, "teams", teamId, "members");
+        console.log(`[getTeamMembersWithUsers] Fetching members for team: ${teamId}`);
         const snap = await getDocs(membersCol);
+        console.log(`[getTeamMembersWithUsers] Found ${snap.size} member documents`);
         const members: TeamMemberWithUser[] = [];
 
         for (const memberDoc of snap.docs) {
@@ -121,6 +123,7 @@ export const getTeamMembersWithUsers = async (
                 joinedAt: unknown;
             };
             const userId = memberDoc.id;
+            console.log(`[getTeamMembersWithUsers] Processing member: ${userId}, role: ${memberData.role}`);
             const userSnap = await getDoc(doc(db, "users", userId));
             const name = userSnap.exists()
                 ? (userSnap.data() as { name?: string }).name ?? "—"
@@ -128,6 +131,7 @@ export const getTeamMembersWithUsers = async (
             const email = userSnap.exists()
                 ? (userSnap.data() as { email?: string }).email ?? "—"
                 : "—";
+            console.log(`[getTeamMembersWithUsers] User ${userId}: name=${name}, email=${email}`);
             members.push({
                 userId,
                 role: memberData.role,
@@ -137,9 +141,11 @@ export const getTeamMembersWithUsers = async (
             });
         }
 
+        console.log(`[getTeamMembersWithUsers] Returning ${members.length} members`);
         return { members, error: null };
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        console.error(`[getTeamMembersWithUsers] Error:`, message);
         return { members: [], error: message };
     }
 };
@@ -190,25 +196,25 @@ export const getTeamsForUser = async (
     }
 
     // Fallback: if collectionGroup failed, iterate all teams and check member doc existence.
-    if (memberQueryFailed) {
-        try {
-            const teamsCol = collection(db, "teams");
-            const allTeamsSnap = await getDocs(teamsCol);
-            for (const tdoc of allTeamsSnap.docs) {
-                try {
-                    const memberRef = doc(db, "teams", tdoc.id, "members", uid);
-                    const memberSnap = await getDoc(memberRef);
-                    if (memberSnap.exists()) teamIds.add(tdoc.id);
-                } catch(err) {
-                    // ignore per-team errors
-                    console.error("[getTeamsForUser] per-team member check failed for team", tdoc.id, ":", err);
-                }
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error("[getTeamsForUser] fallback per-team member check failed:", message);
-        }
-    }
+    // if (memberQueryFailed) {
+    //     try {
+    //         const teamsCol = collection(db, "teams");
+    //         const allTeamsSnap = await getDocs(teamsCol);
+    //         for (const tdoc of allTeamsSnap.docs) {
+    //             try {
+    //                 const memberRef = doc(db, "teams", tdoc.id, "members", uid);
+    //                 const memberSnap = await getDoc(memberRef);
+    //                 if (memberSnap.exists()) teamIds.add(tdoc.id);
+    //             } catch(err) {
+    //                 // ignore per-team errors
+    //                 console.error("[getTeamsForUser] per-team member check failed for team", tdoc.id, ":", err);
+    //             }
+    //         }
+    //     } catch (err: unknown) {
+    //         const message = err instanceof Error ? err.message : String(err);
+    //         console.error("[getTeamsForUser] fallback per-team member check failed:", message);
+    //     }
+    // }
 
     const ids = Array.from(teamIds);
     const results = await Promise.all(
