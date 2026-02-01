@@ -33,13 +33,19 @@ async function sendInviteEmail(to: string, teamName: string, acceptLink: string)
     console.warn("SMTP not configured (SMTP_HOST, SMTP_USER, SMTP_PASS). Invite created but email not sent.");
     return;
   }
-  await transport.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@teamify.app",
-    to,
-    subject: `You're invited to join ${teamName} on Teamify`,
-    text: `You have been invited to join the team "${teamName}" on Teamify. Accept the invite by clicking: ${acceptLink}`,
-    html: `<p>You have been invited to join the team <strong>${teamName}</strong> on Teamify.</p><p><a href="${acceptLink}">Accept invite</a></p>`,
-  });
+  try {
+    console.info(`Sending invite email to ${to} via ${process.env.SMTP_HOST}`);
+      const info = await transport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@teamify.app",
+      to,
+      subject: `You're invited to join ${teamName} on Teamify`,
+      text: `You have been invited to join the team "${teamName}" on Teamify. Accept the invite by clicking: ${acceptLink}`,
+      html: `<p>You have been invited to join the team <strong>${teamName}</strong> on Teamify.</p><p><a href="${acceptLink}">Accept invite</a></p>`,
+    });
+      console.info(`Invite email sent to ${to}; messageId=${info?.messageId || 'unknown'}`);
+  } catch (err) {
+    console.error('Failed to send invite email', err);
+  }
 }
 
 interface CreateInviteData {
@@ -54,7 +60,18 @@ interface CreateInviteResult {
 }
 
 export const createInvite = functions.onCall(
-  { enforceAppCheck: false },
+  {
+    enforceAppCheck: false,
+    // Mount these Secret Manager secrets as environment variables at runtime
+    secrets: [
+      "SMTP_HOST",
+      "SMTP_PORT",
+      "SMTP_USER",
+      "SMTP_PASS",
+      "SMTP_FROM",
+      "ACCEPT_INVITE_BASE_URL",
+    ],
+  },
   async (request): Promise<CreateInviteResult> => {
     const uid = request.auth?.uid;
     if (!uid) {
@@ -115,7 +132,10 @@ interface AcceptInviteResult {
 }
 
 export const acceptInvite = functions.onCall(
-  { enforceAppCheck: false },
+  {
+    enforceAppCheck: false,
+    secrets: ["ACCEPT_INVITE_BASE_URL"],
+  },
   async (request): Promise<AcceptInviteResult> => {
     const uid = request.auth?.uid;
     if (!uid) {

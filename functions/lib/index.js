@@ -32,15 +32,33 @@ async function sendInviteEmail(to, teamName, acceptLink) {
         console.warn("SMTP not configured (SMTP_HOST, SMTP_USER, SMTP_PASS). Invite created but email not sent.");
         return;
     }
-    await transport.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@teamify.app",
-        to,
-        subject: `You're invited to join ${teamName} on Teamify`,
-        text: `You have been invited to join the team "${teamName}" on Teamify. Accept the invite by clicking: ${acceptLink}`,
-        html: `<p>You have been invited to join the team <strong>${teamName}</strong> on Teamify.</p><p><a href="${acceptLink}">Accept invite</a></p>`,
-    });
+    try {
+        console.info(`Sending invite email to ${to} via ${process.env.SMTP_HOST}`);
+        const info = await transport.sendMail({
+            from: process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@teamify.app",
+            to,
+            subject: `You're invited to join ${teamName} on Teamify`,
+            text: `You have been invited to join the team "${teamName}" on Teamify. Accept the invite by clicking: ${acceptLink}`,
+            html: `<p>You have been invited to join the team <strong>${teamName}</strong> on Teamify.</p><p><a href="${acceptLink}">Accept invite</a></p>`,
+        });
+        console.info(`Invite email sent to ${to}; messageId=${info?.messageId || 'unknown'}`);
+    }
+    catch (err) {
+        console.error('Failed to send invite email', err);
+    }
 }
-exports.createInvite = functions.onCall({ enforceAppCheck: false }, async (request) => {
+exports.createInvite = functions.onCall({
+    enforceAppCheck: false,
+    // Mount these Secret Manager secrets as environment variables at runtime
+    secrets: [
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASS",
+        "SMTP_FROM",
+        "ACCEPT_INVITE_BASE_URL",
+    ],
+}, async (request) => {
     const uid = request.auth?.uid;
     if (!uid) {
         return { success: false, error: "Unauthorized" };
@@ -82,7 +100,10 @@ exports.createInvite = functions.onCall({ enforceAppCheck: false }, async (reque
     await sendInviteEmail(normalizedEmail, teamName, acceptLink);
     return { success: true, inviteId: inviteRef.id };
 });
-exports.acceptInvite = functions.onCall({ enforceAppCheck: false }, async (request) => {
+exports.acceptInvite = functions.onCall({
+    enforceAppCheck: false,
+    secrets: ["ACCEPT_INVITE_BASE_URL"],
+}, async (request) => {
     const uid = request.auth?.uid;
     if (!uid) {
         return { success: false, error: "Unauthorized" };
