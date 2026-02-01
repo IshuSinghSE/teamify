@@ -28,7 +28,7 @@ export const createTask = async (
     const taskData = {
       title: data.title.trim(),
       description: (data.description ?? "").trim(),
-      status: data.status ?? "todo",
+      status: data.status ?? "pending",
       createdBy,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

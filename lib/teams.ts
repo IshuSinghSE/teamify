@@ -58,6 +58,26 @@ export interface TeamWithId extends Team {
     id: string;
 }
 
+/** Team with id and member count (for list views) */
+export interface TeamWithMeta extends TeamWithId {
+    memberCount: number;
+}
+
+/**
+ * Get the number of members in a team (lightweight read).
+ */
+export const getTeamMemberCount = async (
+    teamId: string
+): Promise<number> => {
+    try {
+        const membersCol = collection(db, "teams", teamId, "members");
+        const snap = await getDocs(membersCol);
+        return snap.size;
+    } catch {
+        return 0;
+    }
+};
+
 /**
  * Fetch a single team by id.
  */
@@ -124,15 +144,17 @@ export const getTeamMembersWithUsers = async (
 };
 
 /**
- * Fetch all teams the user belongs to (as creator or as member).
+ * Fetch all teams the user belongs to (as creator or as member),
+ * with member count for each. Runs "created by me" and "member of"
+ * queries separately so one failure doesn't hide the other results.
  */
 export const getTeamsForUser = async (
     uid: string
-): Promise<{ teams: TeamWithId[]; error: string | null }> => {
-    try {
-        const teamIds = new Set<string>();
+): Promise<{ teams: TeamWithMeta[]; error: string | null }> => {
+    const teamIds = new Set<string>();
 
-        // Teams created by user
+    // Teams created by user (primary source; must pass member check to read)
+    try {
         const teamsCol = collection(db, "teams");
         const createdQuery = query(
             teamsCol,
@@ -140,8 +162,14 @@ export const getTeamsForUser = async (
         );
         const createdSnap = await getDocs(createdQuery);
         createdSnap.docs.forEach((d) => teamIds.add(d.id));
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[getTeamsForUser] createdBy query failed:", message);
+        return { teams: [], error: message };
+    }
 
-        // Teams where user is in members (e.g. invited)
+    // Teams where user is in members (e.g. invited); may need collection group index
+    try {
         const membersGroup = collectionGroup(db, "members");
         const memberQuery = query(
             membersGroup,
@@ -152,17 +180,22 @@ export const getTeamsForUser = async (
             const teamId = d.ref.parent.parent?.id;
             if (teamId) teamIds.add(teamId);
         });
-
-        const teams: TeamWithId[] = [];
-        for (const teamId of teamIds) {
-            const { team, error } = await getTeam(teamId);
-            if (error || !team) continue;
-            teams.push(team);
-        }
-
-        return { teams, error: null };
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { teams: [], error: message };
+    } catch {
+        // Collection group often needs an index; don't fail the whole load
     }
+
+    const ids = Array.from(teamIds);
+    const results = await Promise.all(
+        ids.map(async (teamId) => {
+            const [teamRes, memberCount] = await Promise.all([
+                getTeam(teamId),
+                getTeamMemberCount(teamId),
+            ]);
+            if (teamRes.error || !teamRes.team) return null;
+            return { ...teamRes.team, memberCount } as TeamWithMeta;
+        })
+    );
+    const teams = results.filter((t): t is TeamWithMeta => t !== null);
+
+    return { teams, error: null };
 };

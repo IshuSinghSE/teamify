@@ -40,7 +40,7 @@ export interface TeamMember {
 export interface Task {
   title: string;
   description: string;
-  status: "todo" | "in_progress" | "done";
+  status: "pending" | "in_progress" | "done";
   createdBy: string; // userId
   createdAt: Timestamp;
   updatedAt: Timestamp;
