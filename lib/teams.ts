@@ -196,25 +196,25 @@ export const getTeamsForUser = async (
     }
 
     // Fallback: if collectionGroup failed, iterate all teams and check member doc existence.
-    // if (memberQueryFailed) {
-    //     try {
-    //         const teamsCol = collection(db, "teams");
-    //         const allTeamsSnap = await getDocs(teamsCol);
-    //         for (const tdoc of allTeamsSnap.docs) {
-    //             try {
-    //                 const memberRef = doc(db, "teams", tdoc.id, "members", uid);
-    //                 const memberSnap = await getDoc(memberRef);
-    //                 if (memberSnap.exists()) teamIds.add(tdoc.id);
-    //             } catch(err) {
-    //                 // ignore per-team errors
-    //                 console.error("[getTeamsForUser] per-team member check failed for team", tdoc.id, ":", err);
-    //             }
-    //         }
-    //     } catch (err: unknown) {
-    //         const message = err instanceof Error ? err.message : String(err);
-    //         console.error("[getTeamsForUser] fallback per-team member check failed:", message);
-    //     }
-    // }
+    if (memberQueryFailed) {
+        try {
+            const teamsCol = collection(db, "teams");
+            const allTeamsSnap = await getDocs(teamsCol);
+            for (const tdoc of allTeamsSnap.docs) {
+                try {
+                    const memberRef = doc(db, "teams", tdoc.id, "members", uid);
+                    const memberSnap = await getDoc(memberRef);
+                    if (memberSnap.exists()) teamIds.add(tdoc.id);
+                } catch(err) {
+                    // ignore per-team errors
+                    console.error("[getTeamsForUser] per-team member check failed for team", tdoc.id, ":", err);
+                }
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error("[getTeamsForUser] fallback per-team member check failed:", message);
+        }
+    }
 
     const ids = Array.from(teamIds);
     const results = await Promise.all(

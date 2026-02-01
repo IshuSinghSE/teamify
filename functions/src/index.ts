@@ -104,15 +104,19 @@ export const createInvite = functions.onCall(
 
     // Idempotency: use a deterministic invite doc ID based on teamId+email
     // so repeated requests for the same email+team return the same pending invite
-    // instead of creating duplicates.
+    // and resend the email instead of creating duplicates.
     const idKey = `${teamId}|${normalizedEmail}`;
     const deterministicId = crypto.createHash("sha256").update(idKey).digest("hex");
     const deterministicRef = db.collection("invites").doc(deterministicId);
     const existing = await deterministicRef.get();
+    
     if (existing.exists) {
-      const data = existing.data() as { status?: string } | undefined;
-      if (data?.status === "pending") {
-        console.info(`Invite already pending for ${normalizedEmail} on team ${teamId}`);
+      const data = existing.data() as { status?: string; token?: string } | undefined;
+      if (data?.status === "pending" && data.token) {
+        // Resend the email with the existing token
+        console.info(`Resending invite email for ${normalizedEmail} on team ${teamId}`);
+        const acceptLink = `${ACCEPT_BASE_URL}/accept-invite?token=${data.token}`;
+        await sendInviteEmail(normalizedEmail, teamName, acceptLink);
         return { success: true, inviteId: deterministicRef.id };
       }
       // If an invite exists but is not pending (accepted/expired), fall through and

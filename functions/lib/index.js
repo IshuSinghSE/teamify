@@ -85,8 +85,30 @@ exports.createInvite = functions.onCall({
         return { success: false, error: "Team not found" };
     }
     const teamName = teamSnap.data()?.name || "the team";
+    // Idempotency: use a deterministic invite doc ID based on teamId+email
+    // so repeated requests for the same email+team return the same pending invite
+    // and resend the email instead of creating duplicates.
+    const idKey = `${teamId}|${normalizedEmail}`;
+    const deterministicId = crypto.createHash("sha256").update(idKey).digest("hex");
+    const deterministicRef = db.collection("invites").doc(deterministicId);
+    const existing = await deterministicRef.get();
+    if (existing.exists) {
+        const data = existing.data();
+        if (data?.status === "pending" && data.token) {
+            // Resend the email with the existing token
+            console.info(`Resending invite email for ${normalizedEmail} on team ${teamId}`);
+            const acceptLink = `${ACCEPT_BASE_URL}/accept-invite?token=${data.token}`;
+            await sendInviteEmail(normalizedEmail, teamName, acceptLink);
+            return { success: true, inviteId: deterministicRef.id };
+        }
+        // If an invite exists but is not pending (accepted/expired), fall through and
+        // create a fresh invite with a new random ID so we don't overwrite history.
+    }
     const token = crypto.randomBytes(32).toString("hex");
-    const inviteRef = db.collection("invites").doc();
+    // If deterministic doc was absent (or not pending), create a new invite doc.
+    const inviteRef = existing.exists && existing.data()?.status !== "pending"
+        ? db.collection("invites").doc()
+        : deterministicRef;
     await inviteRef.set({
         teamId,
         email: normalizedEmail,
