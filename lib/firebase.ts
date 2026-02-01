@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, User as FirebaseUser } from "firebase/auth";
-import { getFirestore, doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { User } from "./types";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -13,56 +13,8 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-
-// Auth Functions
-export const signUp = async (
-  email: string,
-  password: string,
-  name: string
-): Promise<{ user: FirebaseUser | null; error: string | null }> => {
-  try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // Create user document in Firestore
-    const userData: Omit<User, "createdAt"> & { createdAt: ReturnType<typeof serverTimestamp> } = {
-      name,
-      email,
-      createdAt: serverTimestamp(),
-    };
-    await setDoc(doc(db, "users", user.uid), userData);
-
-    return { user, error: null };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { user: null, error: message };
-  }
-};
-
-export const signIn = async (
-  email: string,
-  password: string
-): Promise<{ user: FirebaseUser | null; error: string | null }> => {
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return { user: userCredential.user, error: null };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { user: null, error: message };
-  }
-};
-
-export const signOut = async (): Promise<{ error: string | null }> => {
-  try {
-    await firebaseSignOut(auth);
-    return { error: null };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { error: message };
-  }
-};
+export const functions = getFunctions(app);
